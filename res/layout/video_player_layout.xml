@@ -11,13 +11,19 @@
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
     ></android.opengl.GLSurfaceView> -->
-<com.angzangy.video.MyVideoView
+<!-- <com.angzangy.video.MyVideoView
+        android:id="@+id/video_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+    /> -->
+    <com.angzangy.video.AAGLVideoView
         android:id="@+id/video_view"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
     />
-    
+
     <Button
         android:id="@+id/buttonStart"
         android:layout_width="wrap_content"

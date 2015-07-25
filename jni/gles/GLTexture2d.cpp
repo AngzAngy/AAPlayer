@@ -64,10 +64,14 @@ void GLTexture2d::genTexture(const GLvoid* pixels, int w, int h, GLint format, i
      glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void GLTexture2d::subImage(const GLvoid* pixels,GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type){
+void GLTexture2d::bindTexture(){
     glBindTexture(GL_TEXTURE_2D, mTextureId);
+}
+
+void GLTexture2d::subImage(const GLvoid* pixels,GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type){
+//    glBindTexture(GL_TEXTURE_2D, mTextureId);
     glTexSubImage2D (GL_TEXTURE_2D, 0, xoffset,  yoffset, width, height, format, type, pixels);
-    glBindTexture(GL_TEXTURE_2D, 0);
+//    glBindTexture(GL_TEXTURE_2D, 0);
 	checkGlError("subImage");
 }
 

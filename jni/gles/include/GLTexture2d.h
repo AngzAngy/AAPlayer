@@ -17,6 +17,7 @@ public:
     ~GLTexture2d();
 
     void genTexture(const GLvoid* pixels, int w, int h, GLint format, int texturename,GLenum type = GL_UNSIGNED_BYTE);
+    void bindTexture();
     void subImage(const GLvoid* pixels, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type = GL_UNSIGNED_BYTE);
     int getWidth();
     int getHeight();

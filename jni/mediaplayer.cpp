@@ -6,9 +6,10 @@
 //#define LOG_NDEBUG 0
 #define TAG "FFMpegMediaPlayer"
 
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/stat.h>
+//#include <sys/types.h>
+//#include <sys/time.h>
+//#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -28,32 +29,11 @@ extern "C" {
 #include "mediaplayer.h"
 #include "output.h"
 #include "jnilogger.h"
+#include "image-util.h"
 
 #define FPS_DEBUGGING true
 
 //#define DUM_A
-
-#ifdef DUM_A
-static FILE *adumpf = NULL;
-void adump2File(void* buf, int length, char* fileName){
-    if (adumpf==NULL){
-        adumpf = fopen(fileName, "wb");
-        if(NULL==adumpf){
-            __android_log_print(ANDROID_LOG_ERROR, TAG,"finction: %s--open file error: %s\n",
-                    __FUNCTION__,fileName);
-        }
-    }
-    if(adumpf){
-        fwrite(buf,sizeof(char),length, adumpf);
-    }
-}
-void closeadumpfile(){
-    if(adumpf){
-        fclose(adumpf);
-    }
-    adumpf=NULL;
-}
-#endif//DUM_A
 
 MediaPlayer::MediaPlayer()
 {
@@ -78,12 +58,11 @@ MediaPlayer::MediaPlayer()
     mAudioStreamIndex = -1;
     mRawAudioBuf = NULL;
     mAudioQueue = NULL;
+    mAudioFrame = NULL;
+    mVideoQueue = NULL;
+    mVideoFrame = NULL;
 
     av_register_all();
-
-    #ifdef DUM_A
-    adumpf = NULL;
-    #endif//
 }
 
 MediaPlayer::~MediaPlayer()
@@ -91,10 +70,6 @@ MediaPlayer::~MediaPlayer()
 	if(mListener != NULL) {
 		free(mListener);
 	}
-
-    #ifdef DUM_A
-	closeadumpfile();
-    #endif//
 }
 
 status_t MediaPlayer::prepareAudio()
@@ -316,29 +291,113 @@ bool MediaPlayer::shouldCancel(PacketQueue* queue)
 			  && queue->size() == 0));
 }
 
-void MediaPlayer::decodeVideoCB(AVFrame* frame, double pts, void* userdata){
-    MediaPlayer *player = (MediaPlayer *)userdata;
-    player->showVideo(frame);
+void MediaPlayer::renderVideoCB(Image *pImg, void *userData){
+    MediaPlayer *player = (MediaPlayer *)userData;
+    player->renderVideo(pImg);
 
-	if(FPS_DEBUGGING) {
-		timeval pTime;
-		static int frames = 0;
-		static double t1 = -1;
-		static double t2 = -1;
+      if(FPS_DEBUGGING) {
+          timeval pTime;
+          static int frames = 0;
+          static double t1 = -1;
+          static double t2 = -1;
 
-		gettimeofday(&pTime, NULL);
-		t2 = pTime.tv_sec + (pTime.tv_usec / 1000000.0);
-		if (t1 == -1 || t2 > t1 + 1) {
-			__android_log_print(ANDROID_LOG_INFO, "fffps", "Video fps:%i", frames);
-			//sPlayer->notify(MEDIA_INFO_FRAMERATE_VIDEO, frames, -1);
-			t1 = t2;
-			frames = 0;
-		}
-		frames++;
-	}
-
-	/*Output::VideoDriver_updateSurface();*/
+          gettimeofday(&pTime, NULL);
+          t2 = pTime.tv_sec + (pTime.tv_usec / 1000000.0);
+          if (t1 == -1 || t2 > t1 + 1) {
+              __android_log_print(ANDROID_LOG_INFO, "fffps", "Video fps:%i", frames);
+              //sPlayer->notify(MEDIA_INFO_FRAMERATE_VIDEO, frames, -1);
+              t1 = t2;
+              frames = 0;
+          }
+          frames++;
+      }
 }
+
+void MediaPlayer::renderVideo(Image *pImg){
+    AVPicture pict;
+    AVStream* stream = NULL;
+    int pts = 0;
+    int got_frame = 0;
+    if(mVideoQueue && pImg){
+        stream = mMovieFile->streams[mVideoStreamIndex];
+        if(mVideoConvertCtx == NULL){
+            mVideoConvertCtx = sws_getContext(stream->codec->width,
+                    stream->codec->height,
+                    stream->codec->pix_fmt,
+                    pImg->width,
+                    pImg->height,
+                    AV_PIX_FMT_YUV420P,
+                    SWS_POINT,
+                    NULL,
+                    NULL,
+                    NULL);
+        }
+        if(mVideoQueue->get(&mVideoPacket, true) < 0){
+            return;
+        }
+        avcodec_decode_video2(stream->codec, mVideoFrame, &got_frame, &mVideoPacket);
+        if (got_frame) {
+//            __android_log_print(ANDROID_LOG_INFO, TAG, "myimg videosize: %dx%d",stream->codec->width,stream->codec->height);
+//            __android_log_print(ANDROID_LOG_INFO, TAG, "myimg size: %dx%d",pImg->width,pImg->height);
+//            for(int i=0;i<3;i++){
+//                __android_log_print(ANDROID_LOG_INFO, TAG, "myimg pitch[%d]: %d",i,pImg->pitch[i]);
+//                __android_log_print(ANDROID_LOG_INFO, TAG, "myimg addr[%d]: %d",i,pImg->plane[i]);
+//                __android_log_print(ANDROID_LOG_INFO, TAG, "myimg srcPitch[%d]: %d",i,mVideoFrame->linesize[i]);
+//            }
+            pict.data[0] = (uint8_t*)(pImg->plane[0]);
+            pict.data[1] = (uint8_t*)(pImg->plane[1]);
+            pict.data[2] = (uint8_t*)(pImg->plane[2]);
+            pict.linesize[0] = pImg->pitch[0];
+            pict.linesize[1] = pImg->pitch[1];
+            pict.linesize[2] = pImg->pitch[2];
+            sws_scale(mVideoConvertCtx,
+                      mVideoFrame->data,
+                      mVideoFrame->linesize,
+                      0,
+                      stream->codec->height,
+                      pict.data,
+                      pict.linesize);
+#ifdef DUM_A
+            static int idx = 0;
+            if(idx<10){
+                char fn[256]={0,};
+                int bufsize = (pImg->width * pImg->height) * 3 / 2;
+                sprintf(fn,"/sdcard/DCIM/my_%d_%d_%d_dump.yuv",pImg->width,pImg->height,idx);
+                imageUtil::saveBufToFile((char*)(pImg->plane[0]),bufsize, fn);
+                idx++;
+            }
+#endif//DUM_A
+//            int frameSize = stream->codec->width*stream->codec->height;
+//            memcpy(pImg->plane[0], mVideoFrame->data[0], frameSize);
+//            memcpy(pImg->plane[1], mVideoFrame->data[1], frameSize/4);
+//            memcpy(pImg->plane[2], mVideoFrame->data[2], frameSize/4);
+        }
+        av_free_packet(&mVideoPacket);
+    }
+}
+//void MediaPlayer::decodeVideoCB(AVFrame* frame, double pts, void* userdata){
+//    MediaPlayer *player = (MediaPlayer *)userdata;
+//    player->showVideo(frame);
+//
+//	if(FPS_DEBUGGING) {
+//		timeval pTime;
+//		static int frames = 0;
+//		static double t1 = -1;
+//		static double t2 = -1;
+//
+//		gettimeofday(&pTime, NULL);
+//		t2 = pTime.tv_sec + (pTime.tv_usec / 1000000.0);
+//		if (t1 == -1 || t2 > t1 + 1) {
+//			__android_log_print(ANDROID_LOG_INFO, "fffps", "Video fps:%i", frames);
+//			//sPlayer->notify(MEDIA_INFO_FRAMERATE_VIDEO, frames, -1);
+//			t1 = t2;
+//			frames = 0;
+//		}
+//		frames++;
+//	}
+//
+//	/*Output::VideoDriver_updateSurface();*/
+//}
 
 void MediaPlayer::showVideo(AVFrame* frame){
     if(mVideoConvertCtx == NULL){
@@ -378,31 +437,31 @@ void MediaPlayer::showVideo(AVFrame* frame){
     Output::surface_unlockPixels();
 }
 
-void MediaPlayer::decodeAudioCB(AVFrame* frame, void* userdata){
-    MediaPlayer *player = (MediaPlayer*)userdata;
-    player->playAudio(frame);
-
-	if(FPS_DEBUGGING) {
-		timeval pTime;
-		static int frames = 0;
-		static double t1 = -1;
-		static double t2 = -1;
-
-		gettimeofday(&pTime, NULL);
-		t2 = pTime.tv_sec + (pTime.tv_usec / 1000000.0);
-		if (t1 == -1 || t2 > t1 + 1) {
-			__android_log_print(ANDROID_LOG_INFO, "fffps", "Audio fps:%i", frames);
-			//sPlayer->notify(MEDIA_INFO_FRAMERATE_AUDIO, frames, -1);
-			t1 = t2;
-			frames = 0;
-		}
-		frames++;
-	}
-
-/*	if(Output::AudioDriver_write(buffer, buffer_size) <= 0) {
-		__android_log_print(ANDROID_LOG_ERROR, TAG, "Couldn't write samples to audio track");
-	}*/
-}
+//void MediaPlayer::decodeAudioCB(AVFrame* frame, void* userdata){
+//    MediaPlayer *player = (MediaPlayer*)userdata;
+//    player->playAudio(frame);
+//
+//	if(FPS_DEBUGGING) {
+//		timeval pTime;
+//		static int frames = 0;
+//		static double t1 = -1;
+//		static double t2 = -1;
+//
+//		gettimeofday(&pTime, NULL);
+//		t2 = pTime.tv_sec + (pTime.tv_usec / 1000000.0);
+//		if (t1 == -1 || t2 > t1 + 1) {
+//			__android_log_print(ANDROID_LOG_INFO, "fffps", "Audio fps:%i", frames);
+//			//sPlayer->notify(MEDIA_INFO_FRAMERATE_AUDIO, frames, -1);
+//			t1 = t2;
+//			frames = 0;
+//		}
+//		frames++;
+//	}
+//
+///*	if(Output::AudioDriver_write(buffer, buffer_size) <= 0) {
+//		__android_log_print(ANDROID_LOG_ERROR, TAG, "Couldn't write samples to audio track");
+//	}*/
+//}
 
 void MediaPlayer::decodeAudio2CB(void* userdata){
     MediaPlayer *player = (MediaPlayer*)userdata;
@@ -426,7 +485,6 @@ void MediaPlayer::decodeAudio2CB(void* userdata){
     }
 }
 void MediaPlayer::playAudio2(){
-    AVPacket        packet;
     int got_frame = 0;
     int data_size = 0;
     AVStream* stream = mMovieFile->streams[mAudioStreamIndex];
@@ -444,70 +502,70 @@ void MediaPlayer::playAudio2(){
     if(mAudioSwrCtx==NULL){
         return;
     }
-    if(!mAudioQueue->get(&packet, true)){
+    if(!mAudioQueue->get(&mAudioPacket, true)){
         return;
     }
 
-    avcodec_decode_audio4(codec_ctx, mFrame, &got_frame, &packet);
+    avcodec_decode_audio4(codec_ctx, mAudioFrame, &got_frame, &mAudioPacket);
     if(!got_frame){
         return;
     }
     data_size = av_samples_get_buffer_size(NULL,
             codec_ctx->channels,
-            mFrame->nb_samples,
+            mAudioFrame->nb_samples,
             AV_SAMPLE_FMT_S16, 0);
      if (data_size > 0) {
          if(mRawAudioBuf==NULL){
              mRawAudioBuf = new uint8_t[data_size];
          }
          swr_convert(mAudioSwrCtx,
-                 &mRawAudioBuf, mFrame->nb_samples,
-                 (const uint8_t**)mFrame->data, mFrame->nb_samples);
+                 &mRawAudioBuf, mAudioFrame->nb_samples,
+                 (const uint8_t**)mAudioFrame->data, mAudioFrame->nb_samples);
 
          Output::writeAudioBuf(mRawAudioBuf, data_size);
      }
 
-    av_free_packet(&packet);
+    av_free_packet(&mAudioPacket);
 }
 
-void MediaPlayer::playAudio(AVFrame* frame){
-    AVStream* stream = mMovieFile->streams[mAudioStreamIndex];
-    AVCodecContext* codec_ctx = stream->codec;
-    if(mAudioSwrCtx==NULL){
-        mAudioSwrCtx = swr_alloc_set_opts(NULL,
-            codec_ctx->channel_layout, AV_SAMPLE_FMT_S16, 44100,
-
-            codec_ctx->channel_layout,
-            codec_ctx->sample_fmt ,
-            codec_ctx->sample_rate,
-            0, NULL);
-        swr_init(mAudioSwrCtx);
-    }
-    if(mAudioSwrCtx==NULL){
-        Output::shutdownAudio();
-        return;
-    }
-    int data_size = av_samples_get_buffer_size(NULL,
-            codec_ctx->channels,
-            frame->nb_samples,
-            AV_SAMPLE_FMT_S16, 0);
-     if (data_size > 0) {
-         if(mRawAudioBuf==NULL){
-             mRawAudioBuf = new uint8_t[data_size];
-         }
-         swr_convert(mAudioSwrCtx,
-                 &mRawAudioBuf, frame->nb_samples,
-                 (const uint8_t**)frame->data, frame->nb_samples);
-         Output::writeAudioBuf(mRawAudioBuf, data_size);
-#ifdef DUM_A
-         const char *sampfmt = av_get_sample_fmt_name(AV_SAMPLE_FMT_S16);
-         char fn[256]={0,};
-         sprintf(fn,"/sdcard/DCIM/my_rate%d_ch%d_%s.pcm",44100,
-                 codec_ctx->channels,sampfmt);
-         adump2File(mRawAudioBuf, data_size, fn);
-#endif//DUM_A
-     }
-}
+//void MediaPlayer::playAudio(AVFrame* frame){
+//    AVStream* stream = mMovieFile->streams[mAudioStreamIndex];
+//    AVCodecContext* codec_ctx = stream->codec;
+//    if(mAudioSwrCtx==NULL){
+//        mAudioSwrCtx = swr_alloc_set_opts(NULL,
+//            codec_ctx->channel_layout, AV_SAMPLE_FMT_S16, 44100,
+//
+//            codec_ctx->channel_layout,
+//            codec_ctx->sample_fmt ,
+//            codec_ctx->sample_rate,
+//            0, NULL);
+//        swr_init(mAudioSwrCtx);
+//    }
+//    if(mAudioSwrCtx==NULL){
+//        Output::shutdownAudio();
+//        return;
+//    }
+//    int data_size = av_samples_get_buffer_size(NULL,
+//            codec_ctx->channels,
+//            frame->nb_samples,
+//            AV_SAMPLE_FMT_S16, 0);
+//     if (data_size > 0) {
+//         if(mRawAudioBuf==NULL){
+//             mRawAudioBuf = new uint8_t[data_size];
+//         }
+//         swr_convert(mAudioSwrCtx,
+//                 &mRawAudioBuf, frame->nb_samples,
+//                 (const uint8_t**)frame->data, frame->nb_samples);
+//         Output::writeAudioBuf(mRawAudioBuf, data_size);
+//#ifdef DUM_A
+//         const char *sampfmt = av_get_sample_fmt_name(AV_SAMPLE_FMT_S16);
+//         char fn[256]={0,};
+//         sprintf(fn,"/sdcard/DCIM/my_rate%d_ch%d_%s.pcm",44100,
+//                 codec_ctx->channels,sampfmt);
+//         adump2File(mRawAudioBuf, data_size, fn);
+//#endif//DUM_A
+//     }
+//}
 
 void MediaPlayer::decodeMovie(void* ptr)
 {
@@ -518,17 +576,20 @@ void MediaPlayer::decodeMovie(void* ptr)
 //	mDecoderAudio->onDecode = decodeAudioCB;
 //	mDecoderAudio->userData=this;
 //	mDecoderAudio->startAsync();
-	mFrame = av_frame_alloc();
+	mAudioFrame = av_frame_alloc();
 	mAudioQueue = new PacketQueue();
     Output::createAudioEngine();
     Output::setAudioCallback(decodeAudio2CB, this);
     Output::createBufferQueueAudioPlayer(44100, stream_audio->codec->channels, SL_PCMSAMPLEFORMAT_FIXED_16);
+
+    mVideoFrame = av_frame_alloc();
+    mVideoQueue = new PacketQueue();
 	
-	AVStream* stream_video = mMovieFile->streams[mVideoStreamIndex];
-	mDecoderVideo = new DecoderVideo(stream_video);
-	mDecoderVideo->onDecode = decodeVideoCB;
-	mDecoderVideo->userData = this;
-	mDecoderVideo->startAsync();
+//	AVStream* stream_video = mMovieFile->streams[mVideoStreamIndex];
+//	mDecoderVideo = new DecoderVideo(stream_video);
+//	mDecoderVideo->onDecode = decodeVideoCB;
+//	mDecoderVideo->userData = this;
+//	mDecoderVideo->startAsync();
 	
 	mCurrentState = MEDIA_PLAYER_STARTED;
 	__android_log_print(ANDROID_LOG_ERROR, TAG, "playing %ix%i", mVideoWidth, mVideoHeight);
@@ -548,7 +609,10 @@ void MediaPlayer::decodeMovie(void* ptr)
 		// Is this a packet from the video stream?
 		if (pPacket.stream_index == mVideoStreamIndex) {
 //		    __android_log_print(ANDROID_LOG_ERROR, TAG, "decode %ix%i", mVideoWidth, mVideoHeight);
-			mDecoderVideo->enqueue(&pPacket);
+//			mDecoderVideo->enqueue(&pPacket);
+		    if(mVideoQueue){
+		        mVideoQueue->put(&pPacket);
+		    }
 		} 
 		else if (pPacket.stream_index == mAudioStreamIndex) {
 //			mDecoderAudio->enqueue(&pPacket);
@@ -587,9 +651,18 @@ void MediaPlayer::decodeMovie(void* ptr)
 	    delete mAudioQueue;
 	    mAudioQueue=NULL;
 	}
-	if(mFrame){
-	    av_free(mFrame);
+	if(mAudioFrame){
+	    av_free(mAudioFrame);
+	    mAudioFrame = NULL;
 	}
+    if(mVideoQueue){
+        delete mVideoQueue;
+        mVideoQueue=NULL;
+    }
+    if(mVideoFrame){
+        av_free(mVideoFrame);
+        mVideoFrame = NULL;
+    }
 	if(mCurrentState == MEDIA_PLAYER_STATE_ERROR) {
 		__android_log_print(ANDROID_LOG_INFO, TAG, "playing err");
 	}

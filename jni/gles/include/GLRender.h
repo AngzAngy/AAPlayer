@@ -10,6 +10,8 @@
 
 #define MAX_TEXTURE_NUM 3
 
+typedef void(*RenderDataCB)(Image *pImg, void *userData);
+
 class GLRender {
 
 public:
@@ -17,6 +19,7 @@ public:
     GLRender();
     virtual ~GLRender();
 
+    void setRenderDataCB(RenderDataCB cb, void *userData);
     void createGLProgram(const char * vertexShader, const char * fragShaderSrc);
     void createTexture(const GLvoid* pixels, int w, int h, GLint format, int textureUnit);
     virtual void perRender();
@@ -27,9 +30,13 @@ public:
     virtual void freeBuf(const int bufIdx){};
     virtual bool lockBuf(const int bufIdx, Image *pImg){return false;}
     virtual bool unlockBuf(const int bufIdx){return false;}
+
+    virtual Image *getImagePtr(){return NULL;}
 protected:
     GLProgram *mProgram;
     GLTexture2d *mTextures[MAX_TEXTURE_NUM];
+    RenderDataCB mDataCB;
+    void *mUserData;
 };
 
 #endif

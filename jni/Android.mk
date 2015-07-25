@@ -46,12 +46,19 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := aamediaplayer
 
 LOCAL_CFLAGS := -D__STDC_CONSTANT_MACROS -D_ANDROID_
-LOCAL_CPPFLAGS := -std=gnu++0x
+LOCAL_CPPFLAGS :=  -std=gnu++11
 
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/ffmpeg/include
+GLSRC := gles
+
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/ffmpeg/include \
+                    $(LOCAL_PATH)/gles/include
 
 
 LOCAL_SRC_FILES := \
+    $(GLSRC)/GLProgram.cpp \
+    $(GLSRC)/GLTexture2d.cpp \
+    $(GLSRC)/GLRender.cpp \
+    $(GLSRC)/GLYUV420PRender.cpp \
     packetqueue.cpp \
     output.cpp \
     mediaplayer.cpp \
@@ -59,8 +66,10 @@ LOCAL_SRC_FILES := \
     decoder_audio.cpp \
     decoder_video.cpp \
     thread.cpp \
+    image-util.cpp \
     PlayAudio.cpp \
-    VideoJni.cpp
+    VideoJni.cpp \
+    GLVideoJni.cpp
 
 LOCAL_LDLIBS := -llog  -landroid -lz -lGLESv2 -lOpenSLES
 

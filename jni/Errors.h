@@ -1,7 +1,8 @@
 #ifndef AA_ERRORS_H
 #define AA_ERRORS_H
 
-#include <sys/types.h>
+//#include <sys/types.h>
+#include <stdint.h>
 #include <errno.h>
 
 // use this type to return error codes

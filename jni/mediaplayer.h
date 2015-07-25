@@ -8,6 +8,7 @@
 
 #include "decoder_audio.h"
 #include "decoder_video.h"
+#include "gles/include/Image.h"
 
 #define FFMPEG_PLAYER_MAX_QUEUE_SIZE 10
 
@@ -117,6 +118,8 @@ public:
 class MediaPlayer
 {
 public:
+    static void renderVideoCB(Image *pImg, void *userData);
+
     MediaPlayer();
     ~MediaPlayer();
 	status_t        setDataSource(const char *url);
@@ -149,7 +152,7 @@ private:
 	static void*				startPlayer(void* ptr);
 
 	static void 				decodeVideoCB(AVFrame* frame, double pts, void* userdata);
-	static void 				decodeAudioCB(AVFrame* frame, void* userdata);
+//	static void 				decodeAudioCB(AVFrame* frame, void* userdata);
 	static void                 decodeAudio2CB(void* userdata);
 
 	status_t					prepareAudio();
@@ -157,23 +160,27 @@ private:
 	bool						shouldCancel(PacketQueue* queue);
 	void						decodeMovie(void* ptr);
 	void                        showVideo(AVFrame* frame);
-	void                        playAudio(AVFrame* frame);
+	void                        renderVideo(Image *pImg);
+//	void                        playAudio(AVFrame* frame);
 	void                        playAudio2();
 	
 	double 						mTime;
 	pthread_mutex_t             mLock;
 	pthread_t					mPlayerThread;
-	PacketQueue*				mVideoQueue;
     //Mutex                       mNotifyLock;
     //Condition                   mSignal;
     MediaPlayerListener*		mListener;
     AVFormatContext*			mMovieFile;
     int 						mAudioStreamIndex;
     int 						mVideoStreamIndex;
+    PacketQueue*                mVideoQueue;
+    AVFrame*                    mVideoFrame;
 	DecoderVideo*             	mDecoderVideo;
+	AVPacket                    mVideoPacket;
 	PacketQueue*                mAudioQueue;
     DecoderAudio*				mDecoderAudio;
-	AVFrame*					mFrame;
+    AVPacket                    mAudioPacket;
+	AVFrame*					mAudioFrame;
 	struct SwsContext*			mVideoConvertCtx;
 	struct SwrContext*          mAudioSwrCtx;
 

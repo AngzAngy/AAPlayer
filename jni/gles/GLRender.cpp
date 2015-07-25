@@ -17,7 +17,7 @@ static const GLfloat TextureCoordinates[] = {
     1.0f, 0.0f,
 };
 
-GLRender::GLRender():mProgram(NULL){
+GLRender::GLRender():mProgram(NULL),mDataCB(NULL),mUserData(NULL){
     memset(mTextures, 0, sizeof(GLTexture2d *)*MAX_TEXTURE_NUM);
 }
 
@@ -26,6 +26,11 @@ GLRender::~GLRender(){
     for(int i=0;i<MAX_TEXTURE_NUM;i++){
         deleteC(mTextures[i]);
     }
+}
+
+void GLRender::setRenderDataCB(RenderDataCB cb, void *userData){
+    mDataCB = cb;
+    mUserData = userData;
 }
 
 void GLRender::createGLProgram(const char * vertexShader, const char * fragShaderSrc){
@@ -53,6 +58,9 @@ void GLRender::render(){
     GLuint program = mProgram->getProgramId();
     mProgram->useProgram();
 
+    if(mDataCB){
+        mDataCB(getImagePtr(), mUserData);
+    }
     perRender();
 
     GLint PositionAttribute = glGetAttribLocation(program, "aPosition");
